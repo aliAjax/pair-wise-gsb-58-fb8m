@@ -3,6 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CaseDetailPage } from "./pages/CaseDetailPage";
+import { CaseMergePage } from "./features/caseMerge/CaseMergePage";
 import { CasesPage } from "./pages/CasesPage";
 import { DashboardPage } from "./pages/DashboardPage";
 
@@ -13,6 +14,7 @@ export function App() {
         <Route index element={<DashboardPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="cases" element={<CasesPage />} />
+        <Route path="cases/merge" element={<CaseMergePage />} />
         <Route path="cases/:caseId" element={<CaseDetailPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

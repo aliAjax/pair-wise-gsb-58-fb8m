@@ -9,7 +9,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { ArrowRight, FolderOpen } from "lucide-react";
+import { ArrowRight, FolderOpen, GitMerge } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -50,13 +50,23 @@ export function CasesPage() {
             在一个工作区内联动关系图谱、交易时间线、证据和结论版本。
           </Text>
         </div>
-        <Button
-          variant="light"
-          leftSection={<FolderOpen size={16} />}
-          onClick={() => navigate("/alerts")}
-        >
-          从告警创建关联
-        </Button>
+        <Group>
+          <Button
+            variant="light"
+            color="teal"
+            leftSection={<GitMerge size={16} />}
+            onClick={() => navigate("/cases/merge")}
+          >
+            并案处理
+          </Button>
+          <Button
+            variant="default"
+            leftSection={<FolderOpen size={16} />}
+            onClick={() => navigate("/alerts")}
+          >
+            从告警创建关联
+          </Button>
+        </Group>
       </Group>
 
       <Paper withBorder p="md">

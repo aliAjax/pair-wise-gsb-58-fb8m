@@ -13,7 +13,16 @@ import type {
   RiskLevel,
 } from "../models/types";
 import {
+  applyMerge,
+  buildMergePreview,
+  detectMergeConflicts,
+  MergeConflictError,
+  type MergeConflict,
+  type MergePreview,
+} from "../features/caseMerge/mergeCases";
+import {
   appendAudit,
+  bumpCaseRevision,
   createId,
   nowIso,
   readDatabase,
@@ -158,7 +167,16 @@ export const bankApi = createApi({
             ),
             conclusions: database.conclusions
               .filter((item) => item.caseId === caseId)
-              .sort((a, b) => b.version - a.version),
+              .sort((a, b) => {
+                // 当前版本链在前（版本倒序），并案保留的只读快照在后
+                if (Boolean(a.snapshotFromCaseId) !== Boolean(b.snapshotFromCaseId)) {
+                  return a.snapshotFromCaseId ? 1 : -1;
+                }
+                if (a.snapshotFromCaseId && b.snapshotFromCaseId) {
+                  return (b.snapshotAt ?? "").localeCompare(a.snapshotAt ?? "");
+                }
+                return b.version - a.version;
+              }),
           },
         };
       },
@@ -194,6 +212,10 @@ export const bankApi = createApi({
         targetCase.alertIds = Array.from(
           new Set([...targetCase.alertIds, ...alertIds]),
         );
+        const revision = bumpCaseRevision(database, caseId);
+        selected.forEach((item) => {
+          item.caseRevision = revision;
+        });
         targetCase.updatedAt = nowIso();
         database.alerts = updated;
         appendAudit(database, {
@@ -219,6 +241,9 @@ export const bankApi = createApi({
           return { error: { status: "CUSTOM_ERROR", error: "告警不存在" } };
         }
         alert.status = status;
+        if (alert.caseId) {
+          alert.caseRevision = bumpCaseRevision(database, alert.caseId);
+        }
         appendAudit(database, {
           caseId: alert.caseId,
           actor: "林澜",
@@ -240,7 +265,8 @@ export const bankApi = createApi({
         if (!database.cases.some((item) => item.id === caseId)) {
           return { error: { status: "CUSTOM_ERROR", error: "案件不存在" } };
         }
-        database.nodes.push(node);
+        const revision = bumpCaseRevision(database, caseId);
+        database.nodes.push({ ...node, caseRevision: revision });
         if (relation) {
           database.edges.push({
             id: createId("E"),
@@ -252,6 +278,7 @@ export const bankApi = createApi({
             amount: relation.amount,
             occurredAt: node.data.occurredAt,
             explanation: relation.explanation,
+            caseRevision: revision,
           });
         }
         const targetCase = database.cases.find((item) => item.id === caseId);
@@ -284,7 +311,11 @@ export const bankApi = createApi({
         if (index < 0) {
           return { error: { status: "CUSTOM_ERROR", error: "节点不存在" } };
         }
-        database.nodes[index] = { ...database.nodes[index], ...node };
+        database.nodes[index] = {
+          ...database.nodes[index],
+          ...node,
+          caseRevision: bumpCaseRevision(database, caseId),
+        };
         writeDatabase(database);
         return { data: database.nodes[index] };
       },
@@ -299,12 +330,14 @@ export const bankApi = createApi({
       queryFn: async (input) => {
         await wait();
         const database = readDatabase();
+        const revision = bumpCaseRevision(database, input.caseId);
         const evidence: Evidence = {
           ...input,
           id: createId("EV"),
           submittedAt: nowIso(),
           submittedBy: "林澜",
           version: 1,
+          caseRevision: revision,
         };
         database.evidence.unshift(evidence);
         const targetCase = database.cases.find(
@@ -342,8 +375,9 @@ export const bankApi = createApi({
         await wait();
         const database = readDatabase();
         const existing = database.conclusions.filter(
-          (item) => item.caseId === input.caseId,
+          (item) => item.caseId === input.caseId && !item.snapshotFromCaseId,
         );
+        const revision = bumpCaseRevision(database, input.caseId);
         const conclusion: ConclusionVersion = {
           id: createId("CV"),
           caseId: input.caseId,
@@ -356,6 +390,7 @@ export const bankApi = createApi({
           createdBy: "林澜",
           createdAt: nowIso(),
           reviewer: "赵平",
+          caseRevision: revision,
         };
         database.conclusions.unshift(conclusion);
         const targetCase = database.cases.find(
@@ -395,7 +430,9 @@ export const bankApi = createApi({
         if (status === "pending_review") {
           const hasSubmitted = database.conclusions.some(
             (item) =>
-              item.caseId === caseId && item.status === "submitted",
+              item.caseId === caseId &&
+              item.status === "submitted" &&
+              !item.snapshotFromCaseId,
           );
           if (!hasSubmitted) {
             return {
@@ -406,6 +443,7 @@ export const bankApi = createApi({
             };
           }
         }
+        bumpCaseRevision(database, caseId);
         targetCase.status = status;
         targetCase.updatedAt = nowIso();
         appendAudit(database, {
@@ -442,6 +480,14 @@ export const bankApi = createApi({
         if (!conclusion) {
           return { error: { status: "CUSTOM_ERROR", error: "结论不存在" } };
         }
+        if (conclusion.snapshotFromCaseId) {
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              error: "并案保留的结论快照只读，不能再次复核。",
+            },
+          };
+        }
         if (
           conclusion.status !== "submitted" &&
           conclusion.status !== "draft"
@@ -460,6 +506,7 @@ export const bankApi = createApi({
           targetCase.status =
             decision === "approve" ? "closed" : "supplement";
           targetCase.updatedAt = nowIso();
+          bumpCaseRevision(database, caseId);
         }
         appendAudit(database, {
           caseId,
@@ -477,6 +524,94 @@ export const bankApi = createApi({
         "Dashboard",
       ],
     }),
+    getMergePreview: builder.query<
+      MergePreview,
+      { sourceCaseId: string; targetCaseId: string }
+    >({
+      queryFn: async ({ sourceCaseId, targetCaseId }) => {
+        await wait();
+        const database = readDatabase();
+        try {
+          const preview = buildMergePreview({
+            database,
+            sourceCaseId,
+            targetCaseId,
+          });
+          return { data: preview };
+        } catch (previewError) {
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              error:
+                previewError instanceof Error
+                  ? previewError.message
+                  : "无法生成并案预览",
+            },
+          };
+        }
+      },
+      providesTags: (_result, _error, arg) => [
+        { type: "Case", id: arg.sourceCaseId },
+        { type: "Case", id: arg.targetCaseId },
+      ],
+    }),
+    confirmCaseMerge: builder.mutation<
+      {
+        targetCase: InvestigationCase;
+        mergedAlertIds: string[];
+        conflicts: MergeConflict[];
+      },
+      { preview: MergePreview }
+    >({
+      queryFn: async ({ preview }) => {
+        await wait();
+        const database = readDatabase();
+
+        // 确认时重新检测：预览后任一案件被改动就列出冲突并停住
+        const conflicts = detectMergeConflicts(database, preview);
+        if (conflicts.length > 0) {
+          return {
+            error: {
+              status: "MERGE_CONFLICT",
+              error: new MergeConflictError(conflicts).message,
+              conflicts,
+            },
+          };
+        }
+
+        const mergedAt = nowIso();
+        const { targetCase, mergedAlertIds } = applyMerge(
+          database,
+          preview,
+          mergedAt,
+        );
+
+        appendAudit(database, {
+          caseId: targetCase.id,
+          actor: "林澜",
+          action: "并案归入",
+          detail: `${preview.sourceCaseId}（${preview.sourceCaseTitle}）已并入本案件：告警 ${mergedAlertIds.length} 条，节点复用 ${preview.counts.nodesReuse} 个、迁入 ${preview.counts.nodesMove} 个，关系复用 ${preview.counts.edgesReuse} 条、迁入 ${preview.counts.edgesMove} 条，结论快照 ${preview.counts.conclusionsSnapshot} 份。`,
+        });
+        appendAudit(database, {
+          caseId: preview.sourceCaseId,
+          actor: "林澜",
+          action: "案件并出关闭",
+          detail: `本案件已整体并入 ${targetCase.id}（${targetCase.title}），原案件保留只读快照与审计记录。`,
+        });
+
+        // 单次写入，保证节点、关系、证据、结论和告警原子迁移
+        writeDatabase(database);
+        return { data: { targetCase, mergedAlertIds, conflicts: [] } };
+      },
+      invalidatesTags: (_result, _error, arg) => [
+        "Alerts",
+        "Cases",
+        "Audit",
+        "Dashboard",
+        { type: "Case", id: arg.preview.sourceCaseId },
+        { type: "Case", id: arg.preview.targetCaseId },
+      ],
+    }),
     resetMockData: builder.mutation<{ ok: boolean }, void>({
       queryFn: async () => {
         await wait(180);
@@ -491,11 +626,14 @@ export const bankApi = createApi({
 export const {
   useAddEvidenceMutation,
   useAddGraphNodeMutation,
+  useConfirmCaseMergeMutation,
   useGetAlertsQuery,
   useGetAuditLogsQuery,
   useGetCaseWorkspaceQuery,
   useGetCasesQuery,
   useGetDashboardQuery,
+  useGetMergePreviewQuery,
+  useLazyGetMergePreviewQuery,
   useLinkAlertsToCaseMutation,
   useResetMockDataMutation,
   useReviewConclusionMutation,

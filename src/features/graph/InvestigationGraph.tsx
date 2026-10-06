@@ -87,6 +87,7 @@ interface InvestigationGraphProps {
   edges: InvestigationEdge[];
   selectedNodeId?: string;
   focusedTimelineId?: string;
+  readOnly?: boolean;
   onSelectNode: (nodeId?: string) => void;
   onNodePositionChange: (
     nodeId: string,
@@ -99,6 +100,7 @@ export function InvestigationGraph({
   edges,
   selectedNodeId,
   focusedTimelineId,
+  readOnly = false,
   onSelectNode,
   onNodePositionChange,
 }: InvestigationGraphProps) {
@@ -167,6 +169,7 @@ export function InvestigationGraph({
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        nodesDraggable={!readOnly}
         onNodeClick={(_event, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode(undefined)}
         onNodeDragStop={(_event, node) =>

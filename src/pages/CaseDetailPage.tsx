@@ -25,6 +25,7 @@ import {
   Check,
   FilePlus2,
   GitBranchPlus,
+  GitMerge,
   RotateCcw,
   Send,
 } from "lucide-react";
@@ -156,7 +157,14 @@ export function CaseDetailPage() {
     data.case.alertIds.includes(item.id),
   );
   const selectedNode = data.nodes.find((item) => item.id === selectedNodeId);
-  const latestConclusion = data.conclusions[0];
+  const activeConclusions = data.conclusions.filter(
+    (item) => !item.snapshotFromCaseId,
+  );
+  const snapshotConclusions = data.conclusions.filter(
+    (item) => item.snapshotFromCaseId,
+  );
+  const latestConclusion = activeConclusions[0];
+  const isReadOnly = Boolean(data.case.mergedIntoCaseId);
 
   const handleTimelineFocus = (event?: TimelineEvent) => {
     dispatch(focusTimeline(event?.id));
@@ -392,8 +400,20 @@ export function CaseDetailPage() {
         </Group>
         <Group>
           <Button
+            variant="light"
+            color="teal"
+            leftSection={<GitMerge size={16} />}
+            disabled={isReadOnly}
+            onClick={() =>
+              navigate(`/cases/merge?from=${encodeURIComponent(caseId)}`)
+            }
+          >
+            并案处理
+          </Button>
+          <Button
             variant="default"
             leftSection={<GitBranchPlus size={16} />}
+            disabled={isReadOnly}
             onClick={nodeModal.open}
           >
             加入图谱节点
@@ -401,18 +421,43 @@ export function CaseDetailPage() {
           <Button
             variant="light"
             leftSection={<FilePlus2 size={16} />}
+            disabled={isReadOnly}
             onClick={evidenceModal.open}
           >
             登记证据
           </Button>
           <Button
             leftSection={<Send size={16} />}
+            disabled={isReadOnly}
             onClick={conclusionModal.open}
           >
             新建结论版本
           </Button>
         </Group>
       </Group>
+
+      {data.case.mergedIntoCaseId ? (
+        <Alert color="gray" icon={<GitMerge size={18} />}>
+          <Group justify="space-between">
+            <Text size="sm">
+              本案件已于
+              {data.case.mergedAt
+                ? ` ${new Date(data.case.mergedAt).toLocaleString("zh-CN", {
+                    hour12: false,
+                  })}`
+                : ""}{" "}
+              整体并入 {data.case.mergedIntoCaseId}，当前为只读归档视图。
+            </Text>
+            <Button
+              size="xs"
+              variant="light"
+              onClick={() => navigate(`/cases/${data.case.mergedIntoCaseId}`)}
+            >
+              打开目标案件
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
 
       <Paper withBorder p="md">
         <Group justify="space-between">
@@ -429,6 +474,7 @@ export function CaseDetailPage() {
               size="xs"
               variant="default"
               loading={isTransitioning}
+              disabled={isReadOnly}
               onClick={() => handleTransition("investigating")}
             >
               标记调查中
@@ -437,6 +483,7 @@ export function CaseDetailPage() {
               size="xs"
               variant="light"
               loading={isTransitioning}
+              disabled={isReadOnly}
               onClick={() => handleTransition("pending_review")}
             >
               提交复核
@@ -446,6 +493,7 @@ export function CaseDetailPage() {
               variant="light"
               color="orange"
               loading={isTransitioning}
+              disabled={isReadOnly}
               onClick={() => handleTransition("supplement")}
             >
               要求补证
@@ -455,6 +503,7 @@ export function CaseDetailPage() {
               variant="light"
               color="teal"
               loading={isTransitioning}
+              disabled={isReadOnly}
               onClick={() => handleTransition("closed")}
             >
               关闭案件
@@ -494,8 +543,12 @@ export function CaseDetailPage() {
                   edges={data.edges}
                   selectedNodeId={selectedNodeId}
                   focusedTimelineId={focusedTimelineId}
+                  readOnly={isReadOnly}
                   onSelectNode={(nodeId) => dispatch(selectNode(nodeId))}
                   onNodePositionChange={(nodeId, position) => {
+                    if (isReadOnly) {
+                      return;
+                    }
                     const node = data.nodes.find((item) => item.id === nodeId);
                     if (node) {
                       void updateNode({
@@ -576,6 +629,7 @@ export function CaseDetailPage() {
               </div>
               <Button
                 leftSection={<FilePlus2 size={16} />}
+                disabled={isReadOnly}
                 onClick={evidenceModal.open}
               >
                 登记证据
@@ -660,10 +714,15 @@ export function CaseDetailPage() {
                       已通过的版本不可被覆盖，后续修改将产生新版本。
                     </Text>
                   </div>
-                  <Button onClick={conclusionModal.open}>新建版本</Button>
+                  <Button
+                    disabled={isReadOnly}
+                    onClick={conclusionModal.open}
+                  >
+                    新建版本
+                  </Button>
                 </Group>
                 <Stack gap={0}>
-                  {data.conclusions.map((item, index) => (
+                  {activeConclusions.map((item, index) => (
                     <div key={item.id}>
                       {index > 0 ? <Divider /> : null}
                       <Stack gap="xs" p="md">
@@ -703,6 +762,64 @@ export function CaseDetailPage() {
                       </Stack>
                     </div>
                   ))}
+                  {activeConclusions.length === 0 ? (
+                    <Text c="dimmed" size="sm" p="md">
+                      尚无本案件自有结论版本。
+                    </Text>
+                  ) : null}
+                  {snapshotConclusions.length > 0 ? (
+                    <div>
+                      <Divider />
+                      <Paper bg="gray.0" p="md">
+                        <Group gap="xs" mb="xs">
+                          <GitMerge size={15} />
+                          <Text fw={600} size="sm">
+                            并案保留的结论快照（只读）
+                          </Text>
+                        </Group>
+                        <Text size="xs" c="dimmed" mb="sm">
+                          以下版本来自被并入案件，提交复核后冻结保存，不进入本案件版本链，也不能再次复核。
+                        </Text>
+                        <Stack gap="sm">
+                          {snapshotConclusions.map((item) => (
+                            <Paper
+                              key={item.id}
+                              withBorder
+                              p="sm"
+                              bg="white"
+                            >
+                              <Group justify="space-between">
+                                <Group>
+                                  <Text fw={600} size="sm">
+                                    V{item.version}
+                                  </Text>
+                                  <ConclusionStatusBadge value={item.status} />
+                                  <Badge variant="outline" color="gray">
+                                    {dispositionLabels[item.disposition]}
+                                  </Badge>
+                                  <Badge variant="light" color="orange">
+                                    快照 · 原案件 {item.snapshotFromCaseId}
+                                  </Badge>
+                                </Group>
+                                <Text size="xs" c="dimmed">
+                                  {item.snapshotFromCaseTitle}
+                                </Text>
+                              </Group>
+                              <Text size="sm" mt={6}>
+                                {item.rationale}
+                              </Text>
+                              {item.reviewerNote ? (
+                                <Text size="xs" c="dimmed" mt={6}>
+                                  复核意见（{item.reviewer}）：
+                                  {item.reviewerNote}
+                                </Text>
+                              ) : null}
+                            </Paper>
+                          ))}
+                        </Stack>
+                      </Paper>
+                    </div>
+                  ) : null}
                 </Stack>
               </Paper>
             </Grid.Col>
@@ -727,6 +844,7 @@ export function CaseDetailPage() {
                       description="通过或退回意见均进入不可删除的审计记录"
                       minRows={4}
                       mt="md"
+                      disabled={isReadOnly}
                       value={reviewNote}
                       onChange={(event) =>
                         setReviewNote(event.currentTarget.value)
@@ -737,6 +855,7 @@ export function CaseDetailPage() {
                         leftSection={<Check size={16} />}
                         color="teal"
                         loading={isReviewing}
+                        disabled={isReadOnly}
                         onClick={() => handleReview("approve")}
                       >
                         复核通过
@@ -746,6 +865,7 @@ export function CaseDetailPage() {
                         color="orange"
                         leftSection={<RotateCcw size={16} />}
                         loading={isReviewing}
+                        disabled={isReadOnly}
                         onClick={() => handleReview("return")}
                       >
                         退回补证

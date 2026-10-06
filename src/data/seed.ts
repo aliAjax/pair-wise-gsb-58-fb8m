@@ -148,6 +148,7 @@ export const seedCases: InvestigationCase[] = [
     summary: "三名账户持有人在短时间内共享设备与 IP，资金呈现快进快出。",
     alertIds: ["AL-20260929-001", "AL-20260929-002", "AL-20260928-009"],
     nextReviewAt: "2026-09-29T16:00:00+08:00",
+    revision: 7,
   },
   {
     id: "CASE-2026-016",
@@ -160,6 +161,7 @@ export const seedCases: InvestigationCase[] = [
     summary: "开户后的十二小时内发生多地点 ATM 提现，待复核关联程度。",
     alertIds: ["AL-20260927-012"],
     nextReviewAt: "2026-09-29T11:30:00+08:00",
+    revision: 4,
   },
   {
     id: "CASE-2026-015",
@@ -172,6 +174,7 @@ export const seedCases: InvestigationCase[] = [
     summary: "受益账户与多个已关闭案件存在交易交集，需要补充交易用途材料。",
     alertIds: ["AL-20260925-018"],
     nextReviewAt: "2026-09-30T10:00:00+08:00",
+    revision: 5,
   },
 ];
 
