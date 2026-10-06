@@ -1,0 +1,110 @@
+:root {
+  color: #17252e;
+  background: #f3f6f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  background: #f3f6f7;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.top-bar {
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.main-surface {
+  min-height: calc(100vh - 64px);
+}
+
+.main-nav-link {
+  border-radius: 5px;
+}
+
+.main-nav-link[data-active="true"] {
+  background: var(--mantine-color-teal-0);
+  color: var(--mantine-color-teal-9);
+}
+
+.graph-canvas {
+  position: relative;
+  height: 540px;
+  background: #f8fafb;
+}
+
+.graph-node {
+  width: 190px;
+  min-height: 86px;
+  border-color: var(--mantine-color-gray-3);
+  border-radius: 6px;
+  box-shadow: 0 5px 14px rgba(30, 50, 65, 0.08);
+}
+
+.graph-node-selected {
+  outline: 3px solid var(--mantine-color-teal-4);
+  outline-offset: 2px;
+}
+
+.graph-legend {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 88px);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.case-timeline {
+  padding: 4px 8px 16px 4px;
+}
+
+.timeline-event {
+  padding: 7px;
+  margin-left: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.timeline-event:hover {
+  background: var(--mantine-color-gray-0);
+}
+
+.timeline-item-active .timeline-event {
+  background: var(--mantine-color-orange-0);
+  box-shadow: inset 3px 0 0 var(--mantine-color-orange-6);
+}
+
+.table-row-focused {
+  background: var(--mantine-color-orange-0);
+}
+
+@media (max-width: 768px) {
+  .graph-canvas {
+    height: 470px;
+  }
+
+  .graph-legend {
+    display: none;
+  }
+}
