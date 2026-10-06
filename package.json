@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0 --port 18458",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 18458",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:merge": "node --no-warnings --experimental-loader ./scripts/test-loader.mjs --test scripts/caseMerge.test.ts"
   },
   "dependencies": {
     "@mantine/core": "^9.6.3",

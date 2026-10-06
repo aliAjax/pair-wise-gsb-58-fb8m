@@ -16,8 +16,10 @@ import type {
   InvestigationEdge,
   InvestigationNode,
 } from "../models/types";
+import { MERGE_SCHEMA_VERSION, upgradeDatabase } from "./caseMerge";
 
 export interface MockDatabase {
+  schemaVersion: number;
   alerts: Alert[];
   cases: InvestigationCase[];
   nodes: InvestigationNode[];
@@ -30,6 +32,7 @@ export interface MockDatabase {
 const STORAGE_KEY = "bank-fraud-investigation-db-v1";
 
 const createSeedDatabase = (): MockDatabase => ({
+  schemaVersion: MERGE_SCHEMA_VERSION,
   alerts: structuredClone(seedAlerts),
   cases: structuredClone(seedCases),
   nodes: structuredClone(seedNodes),
@@ -52,7 +55,15 @@ export const readDatabase = (): MockDatabase => {
   }
 
   try {
-    return JSON.parse(stored) as MockDatabase;
+    const parsed = JSON.parse(stored) as Parameters<
+      typeof upgradeDatabase
+    >[0];
+    const { database, upgraded } = upgradeDatabase(parsed);
+    if (upgraded) {
+      // 旧数据补齐归属版本后立即持久化
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(database));
+    }
+    return database;
   } catch {
     const seeded = createSeedDatabase();
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));

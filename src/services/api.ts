@@ -20,6 +20,16 @@ import {
   resetDatabase,
   writeDatabase,
 } from "./mockStorage";
+import {
+  applyCaseMerge,
+  createMergePreview,
+  detectMergeConflicts,
+  MergeConflictError,
+  type CaseMergePreview,
+  type CaseMergeResult,
+  type MergeConflict,
+  type MergeToken,
+} from "./caseMerge";
 
 const wait = (milliseconds = 260) =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -34,6 +44,17 @@ export interface AddNodeInput {
     explanation: string;
     amount?: number;
   };
+}
+
+export interface MergePreviewInput {
+  sourceCaseId: string;
+  targetCaseId: string;
+}
+
+export interface MergeConflictResponse {
+  code: "MERGE_CONFLICT";
+  message: string;
+  conflicts: MergeConflict[];
 }
 
 export const bankApi = createApi({
@@ -158,7 +179,11 @@ export const bankApi = createApi({
             ),
             conclusions: database.conclusions
               .filter((item) => item.caseId === caseId)
-              .sort((a, b) => b.version - a.version),
+              .sort(
+                (a, b) =>
+                  b.version - a.version ||
+                  b.createdAt.localeCompare(a.createdAt),
+              ),
           },
         };
       },
@@ -195,6 +220,7 @@ export const bankApi = createApi({
           new Set([...targetCase.alertIds, ...alertIds]),
         );
         targetCase.updatedAt = nowIso();
+        targetCase.revision += 1;
         database.alerts = updated;
         appendAudit(database, {
           caseId,
@@ -219,6 +245,13 @@ export const bankApi = createApi({
           return { error: { status: "CUSTOM_ERROR", error: "告警不存在" } };
         }
         alert.status = status;
+        const alertCase = alert.caseId
+          ? database.cases.find((item) => item.id === alert.caseId)
+          : undefined;
+        if (alertCase) {
+          alertCase.updatedAt = nowIso();
+          alertCase.revision += 1;
+        }
         appendAudit(database, {
           caseId: alert.caseId,
           actor: "林澜",
@@ -240,7 +273,11 @@ export const bankApi = createApi({
         if (!database.cases.some((item) => item.id === caseId)) {
           return { error: { status: "CUSTOM_ERROR", error: "案件不存在" } };
         }
-        database.nodes.push(node);
+        const storedNode: InvestigationNode = {
+          ...node,
+          originCaseId: node.originCaseId ?? caseId,
+        };
+        database.nodes.push(storedNode);
         if (relation) {
           database.edges.push({
             id: createId("E"),
@@ -252,11 +289,13 @@ export const bankApi = createApi({
             amount: relation.amount,
             occurredAt: node.data.occurredAt,
             explanation: relation.explanation,
+            originCaseId: caseId,
           });
         }
         const targetCase = database.cases.find((item) => item.id === caseId);
         if (targetCase) {
           targetCase.updatedAt = nowIso();
+          targetCase.revision += 1;
         }
         appendAudit(database, {
           caseId,
@@ -265,7 +304,7 @@ export const bankApi = createApi({
           detail: `${node.data.label} 已加入，证据强度 ${node.data.evidenceStrength}。`,
         });
         writeDatabase(database);
-        return { data: node };
+        return { data: storedNode };
       },
       invalidatesTags: (_result, _error, input) => [
         { type: "Case", id: input.caseId },
@@ -285,6 +324,13 @@ export const bankApi = createApi({
           return { error: { status: "CUSTOM_ERROR", error: "节点不存在" } };
         }
         database.nodes[index] = { ...database.nodes[index], ...node };
+        const targetCase = database.cases.find(
+          (item) => item.id === caseId,
+        );
+        if (targetCase) {
+          targetCase.updatedAt = nowIso();
+          targetCase.revision += 1;
+        }
         writeDatabase(database);
         return { data: database.nodes[index] };
       },
@@ -305,6 +351,7 @@ export const bankApi = createApi({
           submittedAt: nowIso(),
           submittedBy: "林澜",
           version: 1,
+          originCaseId: input.caseId,
         };
         database.evidence.unshift(evidence);
         const targetCase = database.cases.find(
@@ -312,6 +359,7 @@ export const bankApi = createApi({
         );
         if (targetCase) {
           targetCase.updatedAt = nowIso();
+          targetCase.revision += 1;
         }
         appendAudit(database, {
           caseId: input.caseId,
@@ -356,6 +404,7 @@ export const bankApi = createApi({
           createdBy: "林澜",
           createdAt: nowIso(),
           reviewer: "赵平",
+          originCaseId: input.caseId,
         };
         database.conclusions.unshift(conclusion);
         const targetCase = database.cases.find(
@@ -364,6 +413,7 @@ export const bankApi = createApi({
         if (targetCase) {
           targetCase.status = input.submit ? "pending_review" : "investigating";
           targetCase.updatedAt = nowIso();
+          targetCase.revision += 1;
         }
         appendAudit(database, {
           caseId: input.caseId,
@@ -401,13 +451,15 @@ export const bankApi = createApi({
             return {
               error: {
                 status: "CUSTOM_ERROR",
-                error: "请先提交一份结论版本，再进入复核。",
+                error:
+                  "请先提交一份结论版本（并案保留的复核快照为只读，不能用于提交复核），再进入复核。",
               },
             };
           }
         }
         targetCase.status = status;
         targetCase.updatedAt = nowIso();
+        targetCase.revision += 1;
         appendAudit(database, {
           caseId,
           actor: "林澜",
@@ -449,7 +501,10 @@ export const bankApi = createApi({
           return {
             error: {
               status: "CUSTOM_ERROR",
-              error: "当前版本不能再次复核。",
+              error:
+                conclusion.status === "snapshot"
+                  ? "复核留痕快照为只读版本，不能再次复核。"
+                  : "当前版本不能再次复核。",
             },
           };
         }
@@ -460,6 +515,7 @@ export const bankApi = createApi({
           targetCase.status =
             decision === "approve" ? "closed" : "supplement";
           targetCase.updatedAt = nowIso();
+          targetCase.revision += 1;
         }
         appendAudit(database, {
           caseId,
@@ -473,6 +529,77 @@ export const bankApi = createApi({
       invalidatesTags: (_result, _error, input) => [
         { type: "Case", id: input.caseId },
         "Cases",
+        "Audit",
+        "Dashboard",
+      ],
+    }),
+    mergeCasePreview: builder.query<CaseMergePreview, MergePreviewInput>({
+      queryFn: async ({ sourceCaseId, targetCaseId }) => {
+        await wait();
+        const database = readDatabase();
+        try {
+          return {
+            data: createMergePreview(
+              database,
+              sourceCaseId,
+              targetCaseId,
+              nowIso(),
+            ),
+          };
+        } catch (previewError) {
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              error:
+                previewError instanceof Error
+                  ? previewError.message
+                  : "无法生成并案预览。",
+            },
+          };
+        }
+      },
+      providesTags: (_result, _error, arg) => [
+        { type: "Case", id: arg.sourceCaseId },
+        { type: "Case", id: arg.targetCaseId },
+      ],
+    }),
+    commitCaseMerge: builder.mutation<
+      CaseMergeResult,
+      { sourceCaseId: string; targetCaseId: string; token: MergeToken }
+    >({
+      queryFn: async ({ sourceCaseId, targetCaseId, token }) => {
+        await wait();
+        const database = readDatabase();
+        if (
+          token.sourceCaseId !== sourceCaseId ||
+          token.targetCaseId !== targetCaseId
+        ) {
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              error: "确认信息与预览不一致，请重新生成并案预览。",
+            },
+          };
+        }
+        const conflicts = detectMergeConflicts(database, token);
+        if (conflicts.length > 0) {
+          // 冲突时直接返回，不写库：不会留下半迁移数据
+          const response: MergeConflictResponse = {
+            code: "MERGE_CONFLICT",
+            message: new MergeConflictError(conflicts).message,
+            conflicts,
+          };
+          return { error: { status: "CONFLICT", data: response } };
+        }
+        // 全部变更在内存数据库上完成，成功后仅写入一次
+        const result = applyCaseMerge(database, token, nowIso());
+        writeDatabase(database);
+        return { data: result };
+      },
+      invalidatesTags: [
+        "Alerts",
+        "Cases",
+        "Case",
         "Audit",
         "Dashboard",
       ],
@@ -491,12 +618,15 @@ export const bankApi = createApi({
 export const {
   useAddEvidenceMutation,
   useAddGraphNodeMutation,
+  useCommitCaseMergeMutation,
   useGetAlertsQuery,
   useGetAuditLogsQuery,
   useGetCaseWorkspaceQuery,
   useGetCasesQuery,
   useGetDashboardQuery,
   useLinkAlertsToCaseMutation,
+  useLazyMergeCasePreviewQuery,
+  useMergeCasePreviewQuery,
   useResetMockDataMutation,
   useReviewConclusionMutation,
   useSaveConclusionMutation,

@@ -9,7 +9,8 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { ArrowRight, FolderOpen } from "lucide-react";
+import { useDisclosure } from "@mantine/hooks";
+import { ArrowRight, FolderOpen, GitMerge } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -17,6 +18,7 @@ import {
   RiskBadge,
   caseStatusLabel,
 } from "../components/Badges";
+import { MergeCasesModal } from "../components/MergeCasesModal";
 import { useGetCasesQuery } from "../services/api";
 import type { CaseStatus } from "../models/types";
 
@@ -26,6 +28,8 @@ export function CasesPage() {
   const navigate = useNavigate();
   const { data: cases = [] } = useGetCasesQuery();
   const [filter, setFilter] = useState<CaseFilter>("open");
+  const [mergeOpened, mergeModal] = useDisclosure(false);
+  const [mergeSourceId, setMergeSourceId] = useState("");
 
   const visibleCases = useMemo(() => {
     if (filter === "all") {
@@ -118,6 +122,11 @@ export function CasesPage() {
                     <Text size="xs" c="dimmed" lineClamp={2} mt={3}>
                       {item.summary}
                     </Text>
+                    {item.mergedIntoCaseId ? (
+                      <Text size="xs" c="blue" mt={3}>
+                        已并入 {item.mergedIntoCaseId}
+                      </Text>
+                    ) : null}
                   </Table.Td>
                   <Table.Td>
                     <RiskBadge value={item.riskLevel} />
@@ -139,14 +148,40 @@ export function CasesPage() {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Button
-                      size="xs"
-                      variant="light"
-                      rightSection={<ArrowRight size={14} />}
-                      onClick={() => navigate(`/cases/${item.id}`)}
-                    >
-                      {caseStatusLabel(item.status)}
-                    </Button>
+                    <Group gap="xs" wrap="nowrap">
+                      <Button
+                        size="xs"
+                        variant="light"
+                        rightSection={<ArrowRight size={14} />}
+                        onClick={() => navigate(`/cases/${item.id}`)}
+                      >
+                        {caseStatusLabel(item.status)}
+                      </Button>
+                      {item.mergedIntoCaseId ? (
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          color="blue"
+                          onClick={() =>
+                            navigate(`/cases/${item.mergedIntoCaseId}`)
+                          }
+                        >
+                          查看目标案件
+                        </Button>
+                      ) : (
+                        <Button
+                          size="xs"
+                          variant="default"
+                          leftSection={<GitMerge size={14} />}
+                          onClick={() => {
+                            setMergeSourceId(item.id);
+                            mergeModal.open();
+                          }}
+                        >
+                          并案
+                        </Button>
+                      )}
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -154,6 +189,13 @@ export function CasesPage() {
           </Table>
         </Table.ScrollContainer>
       </Paper>
+
+      <MergeCasesModal
+        opened={mergeOpened}
+        onClose={mergeModal.close}
+        sourceCaseId={mergeSourceId}
+        onMerged={(targetId) => navigate(`/cases/${targetId}`)}
+      />
     </Stack>
   );
 }

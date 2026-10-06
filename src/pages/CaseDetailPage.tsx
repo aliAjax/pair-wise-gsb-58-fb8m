@@ -25,6 +25,7 @@ import {
   Check,
   FilePlus2,
   GitBranchPlus,
+  GitMerge,
   RotateCcw,
   Send,
 } from "lucide-react";
@@ -37,6 +38,7 @@ import {
   EvidenceStrengthBadge,
   RiskBadge,
 } from "../components/Badges";
+import { MergeCasesModal } from "../components/MergeCasesModal";
 import {
   focusEvidence,
   focusTimeline,
@@ -112,6 +114,7 @@ export function CaseDetailPage() {
   const [nodeOpened, nodeModal] = useDisclosure(false);
   const [evidenceOpened, evidenceModal] = useDisclosure(false);
   const [conclusionOpened, conclusionModal] = useDisclosure(false);
+  const [mergeOpened, mergeModal] = useDisclosure(false);
   const [reviewNote, setReviewNote] = useState("");
   const [nodeForm, setNodeForm] = useState({
     sourceId: "",
@@ -156,7 +159,10 @@ export function CaseDetailPage() {
     data.case.alertIds.includes(item.id),
   );
   const selectedNode = data.nodes.find((item) => item.id === selectedNodeId);
-  const latestConclusion = data.conclusions[0];
+  // 复核快照只读，不进入复核操作区
+  const latestConclusion = data.conclusions.find(
+    (item) => item.status !== "snapshot",
+  );
 
   const handleTimelineFocus = (event?: TimelineEvent) => {
     dispatch(focusTimeline(event?.id));
@@ -411,8 +417,37 @@ export function CaseDetailPage() {
           >
             新建结论版本
           </Button>
+          {!data.case.mergedIntoCaseId ? (
+            <Button
+              variant="light"
+              color="grape"
+              leftSection={<GitMerge size={16} />}
+              onClick={mergeModal.open}
+            >
+              并案处理
+            </Button>
+          ) : null}
         </Group>
       </Group>
+
+      {data.case.mergedIntoCaseId ? (
+        <Alert color="blue" icon={<GitMerge size={16} />} title="案件已并案">
+          <Group justify="space-between">
+            <Text size="sm">
+              本案件已整体并入 {data.case.mergedIntoCaseId}
+              ，告警、图谱与证据均已归入目标案件；已提交复核的结论以只读快照保留在目标案件中。
+            </Text>
+            <Button
+              size="xs"
+              variant="light"
+              color="blue"
+              onClick={() => navigate(`/cases/${data.case.mergedIntoCaseId}`)}
+            >
+              打开目标案件
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
 
       <Paper withBorder p="md">
         <Group justify="space-between">
@@ -611,6 +646,16 @@ export function CaseDetailPage() {
                         <Text size="xs" c="dimmed" ff="monospace">
                           {item.id}
                         </Text>
+                        {item.originCaseId && item.originCaseId !== caseId ? (
+                          <Badge
+                            variant="outline"
+                            color="blue"
+                            size="xs"
+                            mt={4}
+                          >
+                            源自 {item.originCaseId}
+                          </Badge>
+                        ) : null}
                       </Table.Td>
                       <Table.Td>{item.source}</Table.Td>
                       <Table.Td>
@@ -674,6 +719,12 @@ export function CaseDetailPage() {
                             <Badge variant="light" color="gray">
                               {dispositionLabels[item.disposition]}
                             </Badge>
+                            {item.originCaseId &&
+                            item.originCaseId !== caseId ? (
+                              <Badge variant="outline" color="blue">
+                                源自 {item.originCaseId}
+                              </Badge>
+                            ) : null}
                           </Group>
                           <Text size="xs" c="dimmed">
                             {item.createdBy} ·{" "}
@@ -690,7 +741,19 @@ export function CaseDetailPage() {
                             </Badge>
                           ))}
                         </Group>
-                        {item.reviewerNote ? (
+                        {item.status === "snapshot" ? (
+                          <Alert color="blue" title="复核留痕快照（只读）">
+                            来自 {item.snapshotFromCaseId} 的 V
+                            {item.snapshotFromVersion}
+                            （原状态 {item.snapshotFromStatus ?? "已提交复核"}
+                            ）。并案时该结论已提交复核，仅按规定保留快照，不再迁移或重新复核。
+                            {item.reviewerNote ? (
+                              <Text size="sm" mt={4}>
+                                复核意见（{item.reviewer}）：{item.reviewerNote}
+                              </Text>
+                            ) : null}
+                          </Alert>
+                        ) : item.reviewerNote ? (
                           <Alert
                             color={
                               item.status === "approved" ? "teal" : "orange"
@@ -754,7 +817,11 @@ export function CaseDetailPage() {
                   </>
                 ) : (
                   <Text c="dimmed" mt="md">
-                    尚无结论版本。
+                    {data.conclusions.some(
+                      (item) => item.status === "snapshot",
+                    )
+                      ? "当前仅有并案保留的复核快照（只读），需要新结论请新建版本后提交复核。"
+                      : "尚无结论版本。"}
                   </Text>
                 )}
               </Paper>
@@ -1117,6 +1184,13 @@ export function CaseDetailPage() {
           </Button>
         </Group>
       </Modal>
+
+      <MergeCasesModal
+        opened={mergeOpened}
+        onClose={mergeModal.close}
+        sourceCaseId={caseId}
+        onMerged={(targetId) => navigate(`/cases/${targetId}`)}
+      />
     </Stack>
   );
 }
